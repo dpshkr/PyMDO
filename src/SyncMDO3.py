@@ -8,13 +8,15 @@ Created on Mon Aug 21 11:21:48 2023
 import socket
 import numpy as np
 
-class MDO3024:
+class SyncMDO3:
     def __init__(self, ipaddress, port):
         self.__sock = socket.create_connection((ipaddress, port))
         
     def query(self, command):
         self.__sock.sendall((command+"\n").encode())
         response = ""
+        
+        # Read the response till newline character
         while (True):
             d = self.__sock.recv(1)
             if (d == b"\n"):
@@ -22,30 +24,29 @@ class MDO3024:
             else:
                 response += (d.decode())
         return response
+        
     def write(self, command):
         self.__sock.sendall((command+"\n").encode())
 
-    def afg_setfrequency(self, frequency):
-        self.write(f":afg:frequency {frequency}")
-
-    def sethorizontalscale(self, scale):
-        self.write(f":horizontal:scale {scale}")
-
     def readdata(self, channel, start=1, stop=10000):
-        self.write(f":data:source ch{channel}")
-        self.write(f":data:start {start}")
-        self.write(f":data:stop {stop}")
-        self.write(f":data:encdg ribinary")
-        self.write(f":data:width 1")
-        self.write(":header 0")
-
-        ymult = float(self.query(":wfmoutpre:ymult?"))
-        yoffset = float(self.query(":wfmoutpre:yoff?"))
-        yzero = float(self.query(":wfmoutpre:yzero?"))
-        xzero = float(self.query(":wfmoutpre:xzero?"))
-        xincr = float(self.query(":wfmoutpre:xincr?"))
+        self.write(f":data:source ch{channel}") # Channel to recieve data from
+        self.write(f":data:start {start}") # Starting point of the data 
+        self.write(f":data:stop {stop}") # Stopping point of the data
+        self.write(f":data:encdg ribinary") # Recieve in RIBinary format, as mentioned in the manual
+        self.write(f":data:width 1") # Data width 1 (8 bits) is enough, as the ADC is 8 bit
+        self.write(":header 0") # Don't send any header
+        
+        '''
+        Read the necessary scaling factors to properly scale the received data
+        '''
+        ymult = float(self.query(":wfmoutpre:ymult?")) # Y dimension multiplyng factor
+        yoffset = float(self.query(":wfmoutpre:yoff?")) # Y offset
+        yzero = float(self.query(":wfmoutpre:yzero?")) # Y zero
+        xzero = float(self.query(":wfmoutpre:xzero?")) # X Zero
+        xincr = float(self.query(":wfmoutpre:xincr?")) # ime interval between two samples, sampling rate
 
         self.write("CURV?")
+        
         '''
         Read the IEEE488.2 binary block header
         '''
@@ -72,24 +73,8 @@ class MDO3024:
         datanp = np.zeros([ndata,2])
         datanp[:,1] = (rawdata-yoffset)*ymult + yzero
         datanp[:,0] = np.linspace(xzero, (ndata+1)*xincr, ndata)
-        '''
-        data = np.zeros([no_of_bytes, 2])
-        i = 0
-        for chunk in rawdata:
-            for byte in chunk:
-                k = int.from_bytes(byte.to_bytes(1), signed=True)
-                data[i,1] = (k - yoffset)*ymult + yzero
-                data[i,0] = xzero + i*xincr
-                i += 1
-
-        '''
         
         return datanp
         
     def close(self):
         self.__sock.close()
-
-
-m = MDO3024("10.33.20.173", 4000)
-print(m.query("*idn?"))
-
